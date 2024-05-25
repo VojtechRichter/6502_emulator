@@ -54,7 +54,22 @@ Byte cpu_fetch_byte(CPU *cpu, Memory *mem, u32 *cycles)
 {
     Byte data = mem->data[cpu->PC];
     cpu->PC++;
+
     *cycles -= 1;
+
+    return data;
+}
+
+Word cpu_fetch_word(CPU *cpu, Memory *mem, u32 *cycles)
+{
+    Word data = mem->data[cpu->PC];
+    cpu->PC += 1;
+
+    // little endian
+    data |= (mem->data[cpu->PC] << 8);
+    cpu->PC += 1;
+
+    *cycles -= 2;
 
     return data;
 }
@@ -67,9 +82,18 @@ Byte cpu_read_byte(Byte addr, CPU *cpu, Memory* mem, u32 *cycles)
     return data;
 }
 
+void write_word(Memory *mem, Word value, u32 addr, u32 *cycles)
+{
+    mem->data[addr] = value & 0xFF;
+    mem->data[addr + 1] = (value >> 8);
+
+    *cycles -= 2;
+}
+
 #define INS_LDA_IM 0xA9
 #define INS_LDA_ZP 0xA5
 #define INS_LDA_ZP_X 0xB5
+#define INS_JSR 0x20
 
 void lda_set_ps_flags(CPU *cpu)
 {
@@ -105,7 +129,7 @@ void cpu_execute(CPU *cpu, Memory *mem, u32 *cycles)
 
             case INS_LDA_ZP_X: {
                 Byte zp_addr = cpu_fetch_byte(cpu, mem, cycles);
-                // what if it overflows?
+                // what if the address overflows?
                 zp_addr += cpu->X; // takes single cycle
                 *cycles -= 1;
 
@@ -113,9 +137,14 @@ void cpu_execute(CPU *cpu, Memory *mem, u32 *cycles)
                 lda_set_ps_flags(cpu);
             } break;
 
-            // case INS_LDA_ZP_X: {
-            //     Byte zp_addr
-            // } break;
+            case INS_JSR: {
+                Word sub_addr = cpu_fetch_word(cpu, mem, cycles);
+                write_word(mem, cpu->PC - 1, cpu->SP, cycles);
+
+                cpu->PC = sub_addr;
+
+                *cycles -= 1;
+            } break;
 
             default: {
                 printf("Instruction not supported: %d\n", ins);
@@ -136,11 +165,13 @@ int main(void)
     Memory *mem = NULL;
     CPU *cpu = cpu_reset(&mem);
 
-    mem->data[0xFFFC] = INS_LDA_ZP;
-    mem->data[0xFFFC] = 0x69;
-    mem->data[0x0069] = 0x84;
+    mem->data[0xFFFC] = INS_JSR;
+    mem->data[0xFFFD] = 0x42;
+    mem->data[0xFFFE] = 0x42;
+    mem->data[0x4242] = INS_LDA_IM;
+    mem->data[0x4243] = 0x84;
 
-    u32 cycles = 3;
+    u32 cycles = 8;
     cpu_execute(cpu, mem, &cycles);
 
     release_resources(mem, cpu);
